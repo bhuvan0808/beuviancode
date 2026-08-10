@@ -1,0 +1,272 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Manual trigger, for re-running against a flaky external dependency without
+  # pushing an empty commit.
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref. A force-push should not leave three
+# builds competing for runners.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege by default. Jobs that need more request it explicitly.
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Each Go module is verified independently, in its own job.
+  #
+  # This is what enforces PROJECT.md's "every module must compile independently".
+  # GOWORK=off is the load-bearing part: it disables the workspace so a module
+  # that only builds because a sibling is present on disk fails here rather than
+  # in a Docker build or on a contributor's fresh clone.
+  # ---------------------------------------------------------------------------
+  go:
+    name: go / ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # report every failing module, not just the first
+      matrix:
+        module: [shared, backend, agent]
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: Verify formatting
+        working-directory: ${{ matrix.module }}
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files are not gofmt-formatted:"
+            echo "$unformatted"
+            echo "Run: gofmt -w ."
+            exit 1
+          fi
+
+      - name: Verify go.mod is tidy
+        working-directory: ${{ matrix.module }}
+        run: |
+          # An untidy go.mod means the dependency set in review differs from the
+          # one that actually builds, which is how a stray dependency slips in.
+          cp go.mod go.mod.orig
+          [ -f go.sum ] && cp go.sum go.sum.orig
+          go mod tidy
+          if ! diff -q go.mod go.mod.orig >/dev/null; then
+            echo "::error::go.mod is not tidy in ${{ matrix.module }}. Run: go mod tidy"
+            diff go.mod.orig go.mod || true
+            exit 1
+          fi
+
+      - name: Enforce the shared module's zero-dependency invariant
+        if: matrix.module == 'shared'
+        run: |
+          # The shared module is imported by both binaries; a third-party
+          # dependency here propagates into everything. This is an architectural
+          # constraint (ADR-0003), so it is enforced mechanically rather than by
+          # code review.
+          if grep -qE '^\s*require' shared/go.mod; then
+            echo "::error::shared/go.mod has gained a dependency. See docs/adr/0003-shared-module-is-protocol-only.md"
+            grep -nE '^\s*require' -A5 shared/go.mod
+            exit 1
+          fi
+
+      - name: Build
+        working-directory: ${{ matrix.module }}
+        run: go build -v ./...
+
+      - name: Vet
+        working-directory: ${{ matrix.module }}
+        run: go vet ./...
+
+      - name: Test with race detector
+        working-directory: ${{ matrix.module }}
+        # -race matters here specifically: the WebSocket gateway, the adapter
+        # registry, and the lifecycle supervisor are all concurrent, and a data
+        # race in any of them is the kind of bug that only shows up in production.
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Report coverage
+        working-directory: ${{ matrix.module }}
+        run: go tool cover -func=coverage.out | tail -n 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.module }}
+          path: ${{ matrix.module }}/coverage.out
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Cross-platform compilation for the agent.
+  #
+  # The agent has per-OS build-tagged files (power_windows.go, power_darwin.go,
+  # power_linux.go). Only compiling on Linux would let a Windows-only syntax error
+  # reach a release, so every target is compiled on every change.
+  # ---------------------------------------------------------------------------
+  agent-cross-compile:
+    name: agent / ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: agent/go.sum
+
+      - name: Build
+        working-directory: agent
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -trimpath -v ./...
+
+      - name: Vet
+        working-directory: agent
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        # vet is GOOS-sensitive, so it catches mistakes in build-tagged files that
+        # a Linux-only vet run would never see.
+        run: go vet ./...
+
+  # ---------------------------------------------------------------------------
+  # Also verify the workspace itself resolves, since that is what developers use
+  # day to day. The `go` job proves modules stand alone; this proves they compose.
+  # ---------------------------------------------------------------------------
+  workspace:
+    name: go workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Verify go.work is in sync
+        run: |
+          go work sync
+          if ! git diff --quiet; then
+            echo "::error::go work sync produced changes; commit them"
+            git diff
+            exit 1
+          fi
+
+      - name: Build every module through the workspace
+        run: |
+          for m in shared backend agent; do
+            echo "--- $m"
+            (cd "$m" && go build ./...)
+          done
+
+  lint:
+    name: golangci-lint / ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [shared, backend, agent]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: ${{ matrix.module }}
+          args: --config=${{ github.workspace }}/.golangci.yml --timeout=5m
+
+  # ---------------------------------------------------------------------------
+  # Security scanning. Separated from lint so a newly-published CVE fails a
+  # distinguishable job — "our code changed" and "the world changed" are different
+  # problems with different responses.
+  # ---------------------------------------------------------------------------
+  vulncheck:
+    name: govulncheck / ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [shared, backend, agent]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run govulncheck
+        working-directory: ${{ matrix.module }}
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  docker:
+    name: docker / backend image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          # Repository root: the image needs backend/ and shared/.
+          context: .
+          file: docker/backend.Dockerfile
+          push: false
+          load: true
+          tags: beuvian-backend:ci
+          build-args: |
+            VERSION=ci-${{ github.sha }}
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify the image runs and validates its configuration
+        # Proves more than "it compiled": the entrypoint executes, the static
+        # binary works in a distroless image with no libc, and config resolution
+        # succeeds from environment variables alone.
+        run: |
+          docker run --rm beuvian-backend:ci -version
+          docker run --rm -e BEUVIAN_ENV=development beuvian-backend:ci -check
+
+      - name: Fail if the image runs as root
+        run: |
+          user=$(docker inspect --format '{{.Config.User}}' beuvian-backend:ci)
+          echo "image user: ${user:-<root>}"
+          case "$user" in
+            ""|root|0|0:0)
+              echo "::error::the backend image must not run as root"
+              exit 1 ;;
+          esac

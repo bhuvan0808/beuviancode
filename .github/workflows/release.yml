@@ -1,0 +1,207 @@
+name: Release
+
+# Releases are cut from a tag. Tag-driven rather than branch-driven so a release
+# is an explicit, reviewable act with an immutable reference, and so re-running the
+# workflow reproduces the same artifacts.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (for re-running a failed release)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  # Never publish artifacts from a commit that does not pass CI. Cheap insurance
+  # against a tag pushed from a branch that was never green.
+  verify:
+    name: Verify before release
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Test every module
+        run: |
+          for m in shared backend agent; do
+            echo "--- $m"
+            (cd "$m" && go build ./... && go vet ./... && go test -race ./...)
+          done
+
+  agent:
+    name: agent / ${{ matrix.goos }}-${{ matrix.goarch }}
+    needs: verify
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64, ext: ".exe" }
+          - { goos: windows, goarch: arm64, ext: ".exe" }
+          - { goos: darwin, goarch: amd64, ext: "" }
+          - { goos: darwin, goarch: arm64, ext: "" }
+          - { goos: linux, goarch: amd64, ext: "" }
+          - { goos: linux, goarch: arm64, ext: "" }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the build can describe its own provenance.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: agent/go.sum
+
+      - name: Resolve version metadata
+        id: meta
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "version=${tag}" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # SOURCE_DATE_EPOCH-style fixed timestamp from the commit, not `date`,
+          # so re-running the workflow produces an identical binary.
+          echo "date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        working-directory: agent
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          out="beuvian-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          go build -trimpath \
+            -ldflags="-w -s \
+              -X github.com/bhuvan0808/beuviancode/shared/version.Version=${{ steps.meta.outputs.version }} \
+              -X github.com/bhuvan0808/beuviancode/shared/version.Commit=${{ steps.meta.outputs.commit }} \
+              -X github.com/bhuvan0808/beuviancode/shared/version.Date=${{ steps.meta.outputs.date }}" \
+            -o "../dist/$out" ./cmd/beuvian-agent
+
+      - name: Checksum
+        run: |
+          cd dist
+          # Per-artifact checksums, merged in the release job. Users on a slow
+          # connection can verify one download without fetching all six.
+          sha256sum * > "beuvian-agent-${{ matrix.goos }}-${{ matrix.goarch }}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          retention-days: 7
+
+  backend-image:
+    name: backend image
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required to push to GitHub Container Registry.
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN rather than a personal access token: scoped to this
+          # repository, rotated automatically, and revoked when the run ends.
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve tag
+        id: meta
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "version=${tag}" >> "$GITHUB_OUTPUT"
+          echo "repo=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/backend.Dockerfile
+          push: true
+          # Multi-arch because Railway and self-hosters may be on either.
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.repo }}/backend:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ steps.meta.outputs.repo }}/backend:latest
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    name: Publish release
+    needs: [agent, backend-image]
+    runs-on: ubuntu-latest
+    permissions:
+      # Only this job writes, and only to create the release.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: agent-*
+          merge-multiple: true
+
+      - name: Consolidate checksums
+        run: |
+          cd artifacts
+          cat *.sha256 > SHA256SUMS
+          rm -f *.sha256
+          ls -la
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: artifacts/*
+          generate_release_notes: true
+          # Prereleases for -rc/-beta tags, so a release candidate is not
+          # presented to users as the current stable download.
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
+          body: |
+            ## Beuvian ${{ github.event.inputs.tag || github.ref_name }}
+
+            ### Desktop Agent
+
+            Download the binary for your platform, verify it against `SHA256SUMS`,
+            and see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for setup.
+
+            | Platform | Binary |
+            | --- | --- |
+            | Windows (x64) | `beuvian-agent-windows-amd64.exe` |
+            | Windows (ARM64) | `beuvian-agent-windows-arm64.exe` |
+            | macOS (Intel) | `beuvian-agent-darwin-amd64` |
+            | macOS (Apple Silicon) | `beuvian-agent-darwin-arm64` |
+            | Linux (x64) | `beuvian-agent-linux-amd64` |
+            | Linux (ARM64) | `beuvian-agent-linux-arm64` |
+
+            ### Backend
+
+            ```
+            docker pull ghcr.io/${{ github.repository }}/backend:${{ github.event.inputs.tag || github.ref_name }}
+            ```
+
+            Beuvian never calls Anthropic or OpenAI APIs. You continue to use and
+            pay for your own coding agent.

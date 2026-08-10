@@ -1,0 +1,39 @@
+# Keep the build context small and secrets out of it.
+#
+# This lives at the repository root because the backend image is built from the
+# root (it needs both backend/ and shared/).
+
+# Nothing here is needed to compile the backend.
+agent/
+dashboard/
+docs/
+infra/
+scripts/
+graphify-out/
+.github/
+
+# VCS and tooling
+.git/
+.gitignore
+.editorconfig
+.golangci.yml
+Makefile
+*.md
+
+# Secrets must never enter the build context: anything copied in is recoverable
+# from the image layers even if a later stage deletes it.
+.env
+.env.*
+config.yaml
+config.local.yaml
+*.pem
+*.key
+*.beuvian-state
+
+# Build output and caches
+bin/
+dist/
+node_modules/
+coverage.out
+go.work
+go.work.sum

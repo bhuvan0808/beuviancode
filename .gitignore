@@ -1,0 +1,62 @@
+# ---- Build output ----
+/dist/
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# ---- Go ----
+# go.work.sum is machine-specific; go.work itself IS committed (see ADR-0002).
+go.work.sum
+vendor/
+
+# ---- Secrets / local configuration ----
+# Never commit real credentials. .env.example and config.example.yaml ARE committed.
+.env
+.env.*
+!.env.example
+config.yaml
+config.local.yaml
+*.pem
+*.key
+!**/testdata/**/*.key
+
+# Encrypted agent configuration written at runtime (contains device credentials).
+beuvian-agent.state
+*.beuvian-state
+
+# ---- Node / Next.js (dashboard) ----
+node_modules/
+.next/
+out/
+.vercel/
+*.tsbuildinfo
+.pnpm-store/
+npm-debug.log*
+yarn-error.log*
+
+# ---- Tooling / coverage ----
+coverage.out
+coverage.html
+*.cpuprofile
+*.memprofile
+.golangci-cache/
+
+# ---- Knowledge graph (graphify) ----
+# graph.json + GRAPH_REPORT.md are regenerable from source; the cache is large.
+graphify-out/cache/
+graphify-out/.graphify_*
+graphify-out/cost.json
+
+# ---- Editors / OS ----
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.recommended.json
+.DS_Store
+Thumbs.db
+desktop.ini

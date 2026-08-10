@@ -1,0 +1,106 @@
+# Beuvian Desktop Agent configuration example.
+#
+# Copy to one of the following (searched in this order) and edit:
+#   ./beuvian-agent.yaml
+#   ./config.yaml
+#   Windows: %AppData%\Beuvian\config.yaml
+#   macOS:   ~/Library/Application Support/Beuvian/config.yaml
+#   Linux:   ~/.config/beuvian/config.yaml
+#
+# Resolution order: CLI flags > environment > this file > defaults.
+# Environment variables use the BEUVIAN_AGENT_ prefix — coding.adapter becomes
+# BEUVIAN_AGENT_CODING_ADAPTER.
+#
+# A missing config file is normal: the defaults point at a local backend, so
+# `beuvian-agent` works with no configuration at all during development.
+
+backend:
+  # ws:// locally, wss:// against a real deployment.
+  url: ws://localhost:8080/v1/ws
+  # REST base for device registration and token refresh, which cannot happen over
+  # the WebSocket because opening the socket requires a token.
+  api_url: http://localhost:8080
+  connect_timeout: 10s
+  # Refuses to apply to a wss:// endpoint: disabling verification there is
+  # indistinguishable from accepting a machine-in-the-middle. For local
+  # self-signed testing only.
+  insecure_skip_verify: false
+
+device:
+  # Generated on first run and persisted to state_path. Leave empty.
+  id: ""
+  # Shown in the dashboard. Defaults to this machine's hostname.
+  name: ""
+  # Encrypted store for the device ID, tokens, and the offline prompt queue.
+  # Defaults to an OS-appropriate per-user path. The device token is NEVER
+  # written to this plaintext config file.
+  state_path: ""
+
+coding:
+  # Only "claude" is targeted for the MVP. codex, gemini, aider, and openhands
+  # are registered placeholders: they are detected on PATH and reported, but
+  # cannot run a session and will fail loudly if selected.
+  adapter: claude
+
+  # Leave empty to detect on PATH. On Windows the npm install of Claude Code
+  # produces a claude.cmd shim rather than a .exe, which detection handles.
+  executable_path: ""
+
+  # The repository the coding agent operates in.
+  #
+  # No default on purpose. The coding agent writes files, so guessing this wrong
+  # destroys real work. It can also be set later from the dashboard.
+  working_directory: ""
+
+  # Extra arguments forwarded verbatim to the coding agent.
+  args: []
+
+  # Off by default: launching a coding agent unprompted is a surprising side
+  # effect of merely starting Beuvian.
+  auto_start: false
+
+session:
+  # Ring buffer of recent output kept in memory, replayed when a dashboard
+  # connects mid-session.
+  log_buffer_lines: 2000
+  # Output is batched before sending; without this a verbose build emits
+  # thousands of frames per second and saturates the socket and the database.
+  log_flush_interval: 250ms
+  log_batch_size: 100
+  # Truncates pathological single lines (minified bundles, base64 blobs) that
+  # would otherwise breach the protocol's 1 MiB frame limit.
+  max_log_line_bytes: 8192
+
+  # How long output must be silent before the agent infers the coding agent is
+  # waiting for input.
+  #
+  # A genuine tradeoff: too short sends false "waiting for you" notifications
+  # while it is merely thinking; too long delays the notification the product
+  # exists to deliver. 20s is tuned for Claude Code.
+  idle_timeout: 20s
+
+  # STATUS frames are sent on every state transition and at least this often, so
+  # the dashboard converges even if a transition frame was lost.
+  status_interval: 10s
+
+power:
+  # On by default: a machine that sleeps mid-task defeats the entire product.
+  # Sleep is inhibited only while a session is actually active.
+  enabled: true
+
+queue:
+  # Prompts buffered while disconnected. Bounded so a long outage cannot grow the
+  # state file without limit.
+  max_offline_prompts: 100
+  # Buffered outbound status and log frames. On overflow the oldest are dropped
+  # and the batch is marked truncated, keeping the transcript honest.
+  max_outbound_events: 5000
+
+log:
+  level: info # debug | info | warn | error
+  # text by default: a desktop agent is usually read by a human at a terminal.
+  format: text
+  add_source: false
+  # Also write to a file. Strongly recommended for a desktop app: when a user
+  # reports a problem, whatever was on stdout is long gone.
+  file_path: ""

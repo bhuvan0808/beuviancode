@@ -1,0 +1,124 @@
+# Beuvian backend configuration example.
+#
+# Copy to config.yaml and edit, or set the equivalent environment variables.
+# config.yaml is gitignored; this example file is committed.
+#
+# Resolution order (PROJECT.md): CLI flags > environment > this file > defaults.
+# Every key below maps to an environment variable by upper-casing the path and
+# prefixing BEUVIAN_ — server.port becomes BEUVIAN_SERVER_PORT.
+#
+# In production, do NOT use this file for secrets. Railway injects environment
+# variables, which keeps credentials out of the image and out of git.
+
+env: development # development | staging | production
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  read_timeout: 15s
+  write_timeout: 15s
+  idle_timeout: 120s
+  # Kept under Railway's 30s SIGTERM-to-SIGKILL window so draining completes.
+  shutdown_grace: 15s
+  body_limit: 1048576 # 1 MiB
+  # CIDRs whose X-Forwarded-For header may be trusted. Empty means trust none.
+  # Trusting this header from arbitrary clients lets anyone spoof their IP and
+  # defeat per-IP rate limiting.
+  trusted_proxies: []
+
+database:
+  # Supabase: Project Settings -> Database -> Connection string (URI).
+  # Use the POOLER endpoint (port 6543) in production: Supabase caps direct
+  # connections, and several backend instances will exhaust that limit.
+  url: postgres://postgres:postgres@localhost:5432/beuvian?sslmode=disable
+  max_open_conns: 25
+  max_idle_conns: 5
+  conn_max_lifetime: 30m
+  conn_max_idle_time: 5m
+  connect_timeout: 10s
+  # Off deliberately. Migrating from application boot means N instances race to
+  # migrate during a rolling deploy. Run migrations as an explicit CI step.
+  auto_migrate: false
+
+redis:
+  # Upstash: Console -> your database -> Redis connect URL (rediss://...).
+  url: redis://localhost:6379
+  pool_size: 10
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+  # Namespaces every key so one Upstash instance can host staging and production
+  # without either flushing the other.
+  key_prefix: "beuvian:"
+  # false lets the backend degrade rather than die when Redis is unreachable:
+  # prompts still persist to Postgres and deliver on reconnect. Losing hot
+  # dispatch is recoverable; losing the API is not.
+  required: false
+
+auth:
+  # GitHub -> Settings -> Developer settings -> OAuth Apps.
+  # The callback URL must match the OAuth app exactly, including the scheme.
+  github_client_id: ""
+  github_client_secret: ""
+  github_callback_url: http://localhost:8080/v1/auth/github/callback
+
+  # Minimum 32 bytes: that is the HS256 output size, and a shorter secret makes
+  # a captured token brute-forceable offline. Generate one with:
+  #   openssl rand -base64 48
+  jwt_secret: ""
+
+  # Short-lived because access tokens are not revocable without a lookup on every
+  # request; their blast radius is bounded by expiry instead.
+  access_token_ttl: 15m
+  # Long-lived, stored hashed, rotated on use.
+  refresh_token_ttl: 720h # 30 days
+  # Longer than a browser session: an unattended desktop agent cannot re-run an
+  # interactive login.
+  device_token_ttl: 2160h # 90 days
+
+  # Empty means host-only, which is correct unless the dashboard and API are on
+  # different subdomains.
+  cookie_domain: ""
+  # Forced to true in production by validation regardless of what is set here.
+  cookie_secure: true
+
+  dashboard_url: http://localhost:3000
+  # Lifetime of the OAuth state parameter — the CSRF defence for the code flow.
+  state_ttl: 10m
+
+cors:
+  # Must be explicit. A wildcard is incompatible with credentialed requests, and
+  # the refresh cookie is credentialed.
+  allowed_origins:
+    - http://localhost:3000
+  allowed_methods: [GET, POST, PATCH, PUT, DELETE, OPTIONS]
+  allowed_headers: [Authorization, Content-Type, X-Request-ID]
+  allow_credentials: true
+  max_age: 12h
+
+rate_limit:
+  enabled: true
+  # Per identity per window: user ID when authenticated, else client IP.
+  requests: 120
+  window: 1m
+  # Tighter budget for auth endpoints, which are the ones worth brute-forcing.
+  login_requests: 10
+  login_window: 1m
+
+websocket:
+  # Several devices plus a few dashboard tabs. Stops one account exhausting the
+  # gateway.
+  max_connections_per_user: 20
+  read_buffer_size: 4096
+  write_buffer_size: 4096
+  # Per-connection outbound buffer. When it fills the connection is dropped
+  # rather than blocking the broadcaster: one slow consumer must not stall every
+  # other client.
+  send_queue_size: 256
+  # How long an unauthenticated socket may stay open before sending AUTH.
+  handshake_timeout: 10s
+
+log:
+  level: info # debug | info | warn | error  (debug is rejected in production)
+  format: json # json | text
+  add_source: false

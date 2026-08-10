@@ -1,0 +1,123 @@
+# Local development stack for Beuvian.
+#
+#   docker compose -f docker/docker-compose.yml up -d
+#
+# This runs Postgres and Redis LOCALLY as stand-ins for Supabase and Upstash. Both
+# are wire-compatible with the managed services, so application code is identical
+# against either — which is the point: a developer must not need cloud credentials
+# to work on Beuvian, and CI must not depend on a shared external database.
+#
+# Production uses the managed services (Supabase, Upstash) via Railway. This file
+# is never deployed.
+
+name: beuvian
+
+services:
+  postgres:
+    # Pinned to Supabase's current major so local behaviour matches production.
+    image: postgres:16-alpine
+    container_name: beuvian-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: beuvian
+      POSTGRES_PASSWORD: beuvian_local_dev
+      POSTGRES_DB: beuvian
+      # Match Supabase's default collation so ORDER BY behaves identically; a
+      # locale mismatch produces different sort orders and thus tests that pass
+      # locally and fail in production.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      # Bound to localhost only. Binding 0.0.0.0 would expose a
+      # trivially-credentialed database to the local network.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # Dependent services wait on this, so the backend cannot start against a
+      # database that is still initialising.
+      test: ["CMD-SHELL", "pg_isready -U beuvian -d beuvian"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: beuvian-redis
+    restart: unless-stopped
+    # Upstash persists data, so persistence is enabled locally too rather than
+    # letting development quietly rely on a cache that never survives a restart.
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy noeviction
+    # noeviction, not allkeys-lru: Redis holds the prompt dispatch queue, and
+    # silently evicting a queued prompt would lose a user's instruction. Bounded
+    # memory with a hard failure is the correct tradeoff for a queue.
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      # The repository root, because the image needs backend/ and shared/.
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+      args:
+        VERSION: dev-compose
+    container_name: beuvian-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      BEUVIAN_ENV: development
+      BEUVIAN_SERVER_HOST: 0.0.0.0
+      BEUVIAN_SERVER_PORT: "8080"
+      BEUVIAN_LOG_LEVEL: debug
+      BEUVIAN_LOG_FORMAT: json
+
+      # Service names resolve on the compose network.
+      BEUVIAN_DB_URL: postgres://beuvian:beuvian_local_dev@postgres:5432/beuvian?sslmode=disable
+      BEUVIAN_REDIS_URL: redis://redis:6379
+
+      # Local-only development secret. Long enough to satisfy the 32-byte HS256
+      # floor. Production secrets come from Railway's environment, never a file.
+      BEUVIAN_AUTH_JWT_SECRET: local_development_only_secret_do_not_use_in_production
+      BEUVIAN_AUTH_DASHBOARD_URL: http://localhost:3000
+      BEUVIAN_CORS_ALLOWED_ORIGINS: http://localhost:3000
+
+      # GitHub OAuth needs a real app to function. Left unset so the stack starts
+      # without it; login is exercised in phase 4. Copy .env.example to .env and
+      # fill these in to test the real flow.
+      BEUVIAN_AUTH_GITHUB_CLIENT_ID: ${BEUVIAN_AUTH_GITHUB_CLIENT_ID:-}
+      BEUVIAN_AUTH_GITHUB_CLIENT_SECRET: ${BEUVIAN_AUTH_GITHUB_CLIENT_SECRET:-}
+      BEUVIAN_AUTH_GITHUB_CALLBACK_URL: http://localhost:8080/v1/auth/github/callback
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  # One-shot configuration validator, for verifying an environment before a real
+  # deploy. Not started by default; run it explicitly:
+  #
+  #   docker compose -f docker/docker-compose.yml --profile tools run --rm config-check
+  config-check:
+    profiles: ["tools"]
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    command: ["-check"]
+    environment:
+      BEUVIAN_ENV: development
+
+volumes:
+  postgres-data:
+  redis-data:

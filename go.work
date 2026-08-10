@@ -1,0 +1,14 @@
+go 1.26
+
+// Beuvian is a Go multi-module monorepo. The workspace file makes local
+// cross-module development work without requiring every module to be published.
+//
+// Each module ALSO carries an explicit `replace` directive for the shared
+// module, so a build still resolves correctly when the workspace is bypassed
+// (GOWORK=off, Docker builds, `go install ./...` from a subdirectory).
+// See docs/adr/0002-go-workspace-multi-module.md for the rationale.
+use (
+	./agent
+	./backend
+	./shared
+)
