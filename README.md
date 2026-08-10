@@ -2,15 +2,24 @@
 
 # Beuvian
 
-**Control AI Coding Agents From Anywhere.**
+**The open-source AI coding agent operating system.**
+
+Control any coding agent from anywhere — from your phone, your browser, or another machine.
 
 [![CI](https://github.com/bhuvan0808/beuviancode/actions/workflows/ci.yml/badge.svg)](https://github.com/bhuvan0808/beuviancode/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go 1.26](https://img.shields.io/badge/Go-1.26-00ADD8.svg)](https://go.dev)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Built with 💙 on Go](https://img.shields.io/badge/built_with-%F0%9F%92%99%20on%20Go-00ADD8.svg)](https://go.dev)
+
+*You keep using — and paying for — your own coding agent.
+Beuvian is the operating system that runs around it.*
 
 </div>
 
 ---
+
+## What is Beuvian?
 
 Your AI coding agent works for 45 minutes and finishes. You are not at your desk.
 
@@ -25,28 +34,43 @@ You start Claude Code  →  it works  →  it finishes
                                           ↓
           You open Beuvian on your phone: "Now implement authentication."
                                           ↓
-              Desktop Agent injects the prompt  →  Claude continues
+              Desktop Agent injects the prompt  →  coding agent continues
 ```
 
-## Beuvian is not an AI
+Beuvian is the **control plane** for your coding agents: remote control, session
+management, live monitoring, notifications, and prompt forwarding — the parts that
+are missing when you are away from the machine.
+
+### Why "an operating system"?
+
+A real OS manages *processes* — their lifecycles, scheduling, communication, and
+resources. Beuvian does the same for **coding agents**:
+
+| OS concept | Beuvian |
+| ---------- | ------- |
+| Process | A coding-agent session (Claude Code, Codex, Gemini, …) |
+| Scheduling | The prompt queue — Postgres-authoritative, Redis-accelerated |
+| Inter-process communication | Versioned WebSocket protocol + REST |
+| Process table | Live session state machine, monitoring from anywhere |
+| Kernel | The backend gateway, in Clean Architecture layers |
+| Device drivers | Pluggable adapter registry — one file per coding agent |
+
+### What Beuvian is not
 
 This matters enough to state plainly:
 
-- Beuvian **never** calls Anthropic APIs.
-- Beuvian **never** calls OpenAI APIs.
-- Beuvian **never** replaces your coding agent.
-- Beuvian never sees your provider API keys.
+- Beuvian **never** calls Anthropic, OpenAI, or any other model API.
+- Beuvian **never** replaces your coding agent — and never sees your provider API keys.
+- Beuvian **never** ships an IDE. It runs *beside* the agent, not instead of it.
 
-You keep using — and paying for — your own coding agent. Beuvian supplies only the
-parts that are missing when you are away from the machine: remote control, session
-management, live monitoring, notifications, and prompt forwarding.
+Your agent writes the code. Beuvian gives you the cockpit.
 
 ---
 
 ## Status
 
-**Phase 1 of 7 complete.** The foundation is built and verified; the product does
-not function end to end yet.
+**Phase 1 of 7 complete.** The foundation is built, verified, and green on CI; the
+product does not function end to end yet.
 
 | Phase | Scope | Status |
 | ----- | ----- | ------ |
@@ -75,7 +99,7 @@ Requires **Go 1.26+**. Docker is optional (for Postgres and Redis locally).
 
 ```bash
 git clone https://github.com/bhuvan0808/beuviancode.git
-cd beuvian
+cd beuviancode
 
 # Every module compiles independently, and all tests run with the race detector.
 make check
@@ -162,6 +186,33 @@ The interesting decisions, and why they were made, are in
 
 ---
 
+## Roadmap
+
+The operating system grows along two axes: **more agents** and **more ways to talk
+to it**.
+
+**Agent support (driver layer).** The adapter registry is built; real drivers land
+phase by phase:
+
+- Claude Code (Phase 3, MVP) → Codex → Gemini CLI → Aider → OpenHands
+- The future belongs to open tools: if your agent can be scripted, it can be driven.
+
+**Surfaces (transport layer).** Remote control should come from wherever you are:
+
+| Surface | Channel | Status |
+| ------- | ------- | ------ |
+| Dashboard | Web (Next.js), WebSocket + REST | ⏳ Phase 4 |
+| Telegram | Bot API — prompts in, notifications out | 🚀 Future scope |
+| WhatsApp | WhatsApp Business / Cloud API | 🚀 Future scope |
+| Voice | Call integration: "tell the agent to fix the tests" | 🚀 Future scope |
+
+Each new surface is an edge transport plugged into the same backend, event stream,
+and prompt queue — an architecture decision made in Phase 1 so these can ship
+without restructuring. The full product specification lives in
+[PROJECT.md](PROJECT.md).
+
+---
+
 ## Documentation
 
 | | |
@@ -199,9 +250,10 @@ issue.
 
 ## Contributing
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and run
+Contributions are welcome — issues, PRs, new coding-agent adapters, new surfaces,
+and honest critique of the design. Read [CONTRIBUTING.md](CONTRIBUTING.md) and run
 `make check` before opening a pull request.
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE) — free to use, modify, and distribute.
