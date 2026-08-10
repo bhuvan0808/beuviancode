@@ -200,12 +200,12 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: ${{ matrix.module }}/go.sum
-      - uses: golangci/golangci-lint-action@v6
+      # v7 required: v6 predates golangci-lint v2 and rejects v2 version
+      # strings outright. Pinned version, not "latest": golangci-lint only
+      # supports Go versions <= the one it was built with — Go 1.26 support
+      # landed in v2.9.0, and "latest" has resolved to stale binaries.
+      - uses: golangci/golangci-lint-action@v7
         with:
-          # Pinned: golangci-lint only supports Go versions <= the one it was
-          # built with. Go 1.26 support landed in v2.9.0; "latest" has
-          # occasionally resolved to a stale binary and failed to load the
-          # config for a `go 1.26` module. Bump deliberately.
           version: v2.12.2
           working-directory: ${{ matrix.module }}
           args: --config=${{ github.workspace }}/.golangci.yml --timeout=5m
