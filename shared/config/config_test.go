@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -404,7 +405,7 @@ func TestHelpRequestIsDistinguishable(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.SetOutput(&strings.Builder{}) // suppress usage output during tests
 	_, err := config.Resolve(&cfg, config.Options{Args: []string{"-h"}, FlagSet: fs})
-	if err != config.ErrHelp {
+	if !errors.Is(err, config.ErrHelp) {
 		t.Errorf("err = %v, want ErrHelp so callers can exit 0 for --help", err)
 	}
 }

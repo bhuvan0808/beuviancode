@@ -251,13 +251,15 @@ func openLogWriter(path string) (io.Writer, func(), error) {
 		return os.Stderr, func() {}, nil
 	}
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		// The path is the user's own configured log location — creating it is
+		// the feature, not an injection vector.
+		if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // G703: user-chosen log path
 			return nil, nil, fmt.Errorf("create log directory %s: %w", dir, err)
 		}
 	}
 	// 0600: agent logs can contain repository paths and task descriptions, which
 	// are not for other users of a shared machine.
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // G304: user-chosen log path
 	if err != nil {
 		return nil, nil, err
 	}

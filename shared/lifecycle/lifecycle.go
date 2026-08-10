@@ -49,8 +49,10 @@ type Func struct {
 	OnStop        func(ctx context.Context) error
 }
 
+// Name returns the component name, used in logs and error messages.
 func (f Func) Name() string { return f.ComponentName }
 
+// Start invokes OnStart, or succeeds immediately when it is nil.
 func (f Func) Start(ctx context.Context) error {
 	if f.OnStart == nil {
 		return nil
@@ -58,6 +60,7 @@ func (f Func) Start(ctx context.Context) error {
 	return f.OnStart(ctx)
 }
 
+// Stop invokes OnStop, or succeeds immediately when it is nil.
 func (f Func) Stop(ctx context.Context) error {
 	if f.OnStop == nil {
 		return nil
@@ -152,7 +155,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 				slog.String("component", c.Name()), slog.String("error", err.Error()))
 			// Unwind what already started, so a failed boot does not leak
 			// connections or leave a port bound.
-			if stopErr := s.shutdown(started); stopErr != nil {
+			if stopErr := s.shutdown(sigCtx, started); stopErr != nil {
 				return errors.Join(startErr, stopErr)
 			}
 			return startErr
@@ -178,7 +181,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		s.log.Error("shutting down: fatal component error", slog.String("error", err.Error()))
 	}
 
-	if err := s.shutdown(started); err != nil {
+	if err := s.shutdown(sigCtx, started); err != nil {
 		return errors.Join(cause, err)
 	}
 	return cause
@@ -186,12 +189,13 @@ func (s *Supervisor) Run(ctx context.Context) error {
 
 // shutdown stops components in reverse registration order.
 //
-// It uses context.WithoutCancel as the base: the parent context is usually
-// already cancelled by the time we get here, and deriving from it would give
-// every Stop an expired deadline and skip the graceful path entirely — the exact
-// bug graceful shutdown exists to avoid.
-func (s *Supervisor) shutdown(started []Component) error {
-	base := context.WithoutCancel(context.Background())
+// The parent context is usually already cancelled by the time we get here, so the
+// derived stop deadlines come from a fresh base: context.WithoutCancel strips
+// cancellation while keeping any values. Deriving from the cancelled parent would
+// give every Stop an expired deadline and skip the graceful path entirely — the
+// exact bug graceful shutdown exists to avoid.
+func (s *Supervisor) shutdown(ctx context.Context, started []Component) error {
+	base := context.WithoutCancel(ctx)
 	deadline := time.Now().Add(s.grace)
 
 	var errs []error

@@ -15,8 +15,9 @@ import (
 	"runtime"
 	"time"
 
-	sharedconfig "github.com/bhuvan0808/beuviancode/shared/config"
 	"gopkg.in/yaml.v3"
+
+	sharedconfig "github.com/bhuvan0808/beuviancode/shared/config"
 )
 
 // EnvPrefix namespaces the agent's environment variables. Distinct from the

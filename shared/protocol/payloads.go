@@ -65,7 +65,9 @@ type StatusPayload struct {
 type LogStream string
 
 const (
+	// StreamStdout identifies regular program output.
 	StreamStdout LogStream = "stdout"
+	// StreamStderr identifies error and warning output.
 	StreamStderr LogStream = "stderr"
 	// StreamSystem is Beuvian's own commentary ("injected prompt", "reconnected")
 	// interleaved into the session transcript so the dashboard terminal reads as
@@ -197,9 +199,12 @@ type AckPayload struct {
 type NotificationSeverity string
 
 const (
-	SeverityInfo    NotificationSeverity = "info"
+	// SeverityInfo ranks a routine notification.
+	SeverityInfo NotificationSeverity = "info"
+	// SeverityWarning ranks a notable condition needing attention.
 	SeverityWarning NotificationSeverity = "warning"
-	SeverityError   NotificationSeverity = "error"
+	// SeverityError ranks a failure requiring the user's intervention.
+	SeverityError NotificationSeverity = "error"
 )
 
 // NotificationPayload is a user-facing notification pushed to the dashboard.

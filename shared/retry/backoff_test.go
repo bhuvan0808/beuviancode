@@ -126,7 +126,7 @@ func TestDoSucceedsAfterTransientFailures(t *testing.T) {
 func TestDoStopsImmediatelyOnPermanentError(t *testing.T) {
 	// An invalid device token must not be retried: retrying cannot help and it
 	// amplifies load against our own gateway.
-	sentinel := errors.New("unauthorized")
+	sentinel := errors.New("unauthorised")
 	calls := 0
 	err := retry.Do(context.Background(),
 		retry.Policy{Initial: time.Millisecond, Max: time.Second, Multiplier: 2, MaxAttempts: 10},

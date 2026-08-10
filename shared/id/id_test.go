@@ -42,7 +42,7 @@ func TestNewIsLexicographicallySortableByTime(t *testing.T) {
 	base := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 	earlier := id.NewAt(base)
 	later := id.NewAt(base.Add(time.Second))
-	if !(earlier < later) {
+	if earlier >= later {
 		t.Errorf("expected %q < %q for ids one second apart", earlier, later)
 	}
 }

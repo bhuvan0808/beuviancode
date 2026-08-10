@@ -43,67 +43,71 @@ linters:
     # mistakes the race detector only finds if a test happens to exercise them.
     - makezero
 
-settings:
-  gosec:
-    excludes:
-      # G104 duplicates errcheck, which is already in the standard set.
-      - G104
-    config:
-      # File permissions: 0600 for state and log files, 0700 for directories.
-      G302: "0600"
-      G306: "0600"
+  settings:
+    gosec:
+      excludes:
+        # G104 duplicates errcheck, which is already in the standard set.
+        - G104
+      config:
+        # File permissions: 0600 for state and log files, 0700 for directories.
+        G302: "0600"
+        G306: "0600"
 
-  govet:
-    enable-all: true
-    disable:
-      # fieldalignment optimises struct memory layout at the cost of grouping
-      # related fields together. Readability wins for config structs, which is
-      # most of what we have.
-      - fieldalignment
+    govet:
+      enable-all: true
+      disable:
+        # fieldalignment optimises struct memory layout at the cost of grouping
+        # related fields together. Readability wins for config structs, which is
+        # most of what we have.
+        - fieldalignment
 
-  revive:
+    revive:
+      rules:
+        - name: exported
+          # Every exported symbol needs a doc comment. This is a library consumed
+          # across module boundaries, so undocumented exports are a real cost.
+          arguments: [checkPrivateReceivers, disableStutteringCheck]
+        - name: error-strings
+        - name: error-return
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: indent-error-flow
+        - name: unexported-return
+        - name: var-naming
+        - name: package-comments
+
+    errcheck:
+      # Deferred Close on a read-only handle has no meaningful failure to handle,
+      # and forcing `_ =` on every one adds noise without adding safety.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+
+    misspell:
+      # PROJECT.md and these sources use British spellings in prose.
+      locale: UK
+      # Fiber is the Go web framework's proper name, not a misspelling of
+      # "fibre". Must be lower case.
+      ignore-rules:
+        - fiber
+
+  exclusions:
+    generated: lax
     rules:
-      - name: exported
-        # Every exported symbol needs a doc comment. This is a library consumed
-        # across module boundaries, so undocumented exports are a real cost.
-        arguments: [checkPrivateReceivers, disableStutteringCheck]
-      - name: error-strings
-      - name: error-return
-      - name: context-as-argument
-      - name: context-keys-type
-      - name: indent-error-flow
-      - name: unexported-return
-      - name: var-naming
-      - name: package-comments
+      # Tests get a looser standard deliberately: table-driven tests are repetitive
+      # by nature, and test fixtures do not need exported-symbol documentation.
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - revive
+          - godot
 
-  errcheck:
-    # Deferred Close on a read-only handle has no meaningful failure to handle,
-    # and forcing `_ =` on every one adds noise without adding safety.
-    exclude-functions:
-      - (io.Closer).Close
-      - (*os.File).Close
-
-  misspell:
-    # PROJECT.md and these sources use British spellings in prose.
-    locale: UK
-
-exclusions:
-  generated: lax
-  rules:
-    # Tests get a looser standard deliberately: table-driven tests are repetitive
-    # by nature, and test fixtures do not need exported-symbol documentation.
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
-        - revive
-        - godot
-
-    # Long struct tags in configuration schemas cannot be wrapped without
-    # breaking them.
-    - path: internal/config/config\.go
-      linters:
-        - lll
+      # Long struct tags in configuration schemas cannot be wrapped without
+      # breaking them.
+      - path: internal/config/config\.go
+        linters:
+          - lll
 
 formatters:
   enable:

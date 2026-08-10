@@ -79,8 +79,10 @@ type ErrorCode string
 
 const (
 	// ErrCodeUnauthorized means the device token is missing, malformed, or
-	// expired. Not retryable without new credentials.
-	ErrCodeUnauthorized ErrorCode = "unauthorized"
+	// expired. Not retryable without new credentials. The wire value keeps the
+	// conventional HTTP error phrasing by design: it is a compatibility surface,
+	// not prose.
+	ErrCodeUnauthorized ErrorCode = "unauthorized" //nolint:misspell // wire value, see above
 	// ErrCodeForbidden means the token is valid but not for this resource.
 	ErrCodeForbidden ErrorCode = "forbidden"
 	// ErrCodeVersionUnsupported means the peer's protocol version is outside the

@@ -65,26 +65,36 @@ const (
 type MessageType string
 
 const (
-	// Agent -> backend.
-	TypeAuth         MessageType = "AUTH"
-	TypeStatus       MessageType = "STATUS"
-	TypeLog          MessageType = "LOG"
+	// TypeAuth is sent agent -> backend to establish the session.
+	TypeAuth MessageType = "AUTH"
+	// TypeStatus reports device and session state, agent -> backend.
+	TypeStatus MessageType = "STATUS"
+	// TypeLog carries batched output lines, agent -> backend.
+	TypeLog MessageType = "LOG"
+	// TypeTaskComplete signals a finished task, agent -> backend.
 	TypeTaskComplete MessageType = "TASK_COMPLETE"
-	TypeTaskWaiting  MessageType = "TASK_WAITING"
+	// TypeTaskWaiting signals the agent is idle and awaiting a prompt,
+	// agent -> backend.
+	TypeTaskWaiting MessageType = "TASK_WAITING"
 
-	// Backend -> agent.
+	// TypePrompt carries a user instruction, backend -> agent.
 	TypePrompt MessageType = "PROMPT"
 
-	// Backend -> dashboard.
-	TypeDeviceOnline  MessageType = "DEVICE_ONLINE"
+	// TypeDeviceOnline is broadcast backend -> dashboard.
+	TypeDeviceOnline MessageType = "DEVICE_ONLINE"
+	// TypeDeviceOffline is broadcast backend -> dashboard.
 	TypeDeviceOffline MessageType = "DEVICE_OFFLINE"
-	TypeNotification  MessageType = "NOTIFICATION"
+	// TypeNotification is pushed backend -> dashboard.
+	TypeNotification MessageType = "NOTIFICATION"
 
-	// Bidirectional.
-	TypePing  MessageType = "PING"
-	TypePong  MessageType = "PONG"
+	// TypePing is bidirectional, agent <-> backend.
+	TypePing MessageType = "PING"
+	// TypePong is bidirectional, agent <-> backend.
+	TypePong MessageType = "PONG"
+	// TypeError is bidirectional and carries an ErrorPayload.
 	TypeError MessageType = "ERROR"
-	TypeAck   MessageType = "ACK"
+	// TypeAck is bidirectional and acknowledges a request-shaped message.
+	TypeAck MessageType = "ACK"
 )
 
 // validTypes is the authoritative membership set for MessageType.

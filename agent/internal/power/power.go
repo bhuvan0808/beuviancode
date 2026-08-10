@@ -133,13 +133,6 @@ func (b *base) markAllowed() {
 	b.since = time.Time{}
 }
 
-// alreadyPrevented reports whether an inhibition is held, for idempotence checks.
-func (b *base) alreadyPrevented() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.prevented
-}
-
 // unsupportedManager is used on platforms without an implementation.
 //
 // It records state and logs, so behaviour is observable and the session manager
@@ -150,6 +143,8 @@ type unsupportedManager struct {
 	goos string
 }
 
+// PreventSleep records the attempt and warns, then reports the platform
+// limitation so callers can degrade instead of pretending.
 func (m *unsupportedManager) PreventSleep(reason string) error {
 	m.markPrevented(reason)
 	m.logger.Warn("cannot prevent sleep on this platform; the session may be interrupted if the machine sleeps",
@@ -157,9 +152,11 @@ func (m *unsupportedManager) PreventSleep(reason string) error {
 	return fmt.Errorf("%w: %s", ErrUnsupported, m.goos)
 }
 
+// AllowSleep releases the inhibition state unconditionally.
 func (m *unsupportedManager) AllowSleep() error {
 	m.markAllowed()
 	return nil
 }
 
+// Status reports the recorded inhibition state.
 func (m *unsupportedManager) Status() State { return m.status() }

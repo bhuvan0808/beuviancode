@@ -134,7 +134,10 @@ func Resolve(dst any, o Options) (Result, error) {
 	// Layer two: the config file.
 	res := Result{FlagSet: fs}
 	if path != "" && o.Decode != nil {
-		data, readErr := os.ReadFile(path)
+		// The path originates from the caller's own CLI/env/config chain —
+		// loading an arbitrary user-chosen file is precisely the resolver's
+		// contract, so this is the feature rather than an injection vector.
+		data, readErr := os.ReadFile(path) //nolint:gosec // G304: user-chosen config path by design
 		switch {
 		case readErr == nil:
 			if err := loader.ApplyFile(data, o.Decode, dst); err != nil {

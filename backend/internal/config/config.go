@@ -13,8 +13,9 @@ import (
 	"strings"
 	"time"
 
-	sharedconfig "github.com/bhuvan0808/beuviancode/shared/config"
 	"gopkg.in/yaml.v3"
+
+	sharedconfig "github.com/bhuvan0808/beuviancode/shared/config"
 )
 
 // EnvPrefix namespaces every environment variable. Railway and Docker inject a
@@ -26,12 +27,20 @@ const EnvPrefix = "BEUVIAN_"
 type Environment string
 
 const (
+	// EnvDevelopment is the local development tier: lenient validation.
 	EnvDevelopment Environment = "development"
-	EnvStaging     Environment = "staging"
-	EnvProduction  Environment = "production"
+	// EnvStaging is the pre-production tier: production validation with a
+	// permissive surface for testing.
+	EnvStaging Environment = "staging"
+	// EnvProduction is the live tier: validation rejects anything that would
+	// weaken the deployment.
+	EnvProduction Environment = "production"
 )
 
-func (e Environment) IsProduction() bool  { return e == EnvProduction }
+// IsProduction reports whether the tier is production.
+func (e Environment) IsProduction() bool { return e == EnvProduction }
+
+// IsDevelopment reports whether the tier is development.
 func (e Environment) IsDevelopment() bool { return e == EnvDevelopment }
 
 // Config is the backend's complete configuration.

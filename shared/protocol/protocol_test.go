@@ -58,11 +58,11 @@ func TestNewEnvelopeRoundTrip(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	var decoded protocol.Envelope
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	if uerr := json.Unmarshal(raw, &decoded); uerr != nil {
+		t.Fatalf("unmarshal: %v", uerr)
 	}
-	if err := decoded.Validate(); err != nil {
-		t.Fatalf("round-tripped envelope failed validation: %v", err)
+	if verr := decoded.Validate(); verr != nil {
+		t.Fatalf("round-tripped envelope failed validation: %v", verr)
 	}
 
 	out, err := protocol.Decode[protocol.PromptPayload](decoded)

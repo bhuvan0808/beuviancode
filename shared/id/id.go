@@ -149,11 +149,14 @@ func Time(s string) (time.Time, error) {
 	if i := strings.LastIndex(s, "_"); i >= 0 {
 		body = s[i+1:]
 	}
-	var ms uint64
+	// Decoded values are validated to be in 0..31 before Time is called, and the
+	// timestamp only ever reaches 48 bits, so int64 arithmetic cannot overflow.
+	// Widening signed-to-signed keeps the conversion unambiguous (gosec G115).
+	var ms int64
 	for i := 0; i < timeChars; i++ {
-		ms = ms<<5 | uint64(decodeMap[body[i]])
+		ms = ms<<5 | int64(decodeMap[body[i]])
 	}
-	return time.UnixMilli(int64(ms)).UTC(), nil
+	return time.UnixMilli(ms).UTC(), nil
 }
 
 // Nonce returns a 128-bit random value for replay protection.

@@ -59,20 +59,25 @@ func newPlaceholder(name string, executables ...string) Factory {
 	}
 }
 
+// Name returns the adapter's canonical identifier.
 func (p *placeholder) Name() string { return p.name }
 
+// Start reports that the adapter is registered but not implemented.
 func (p *placeholder) Start(context.Context, StartOptions) error {
 	p.logger.Error("adapter selected but not implemented",
 		slog.String("hint", "set agent.adapter to \"claude\""))
 	return fmt.Errorf("%w: %s", ErrNotImplemented, p.name)
 }
 
-func (p *placeholder) Stop(context.Context) error { return nil } // nothing runs; Stop is trivially idempotent
+// Stop is trivially idempotent: nothing runs to stop.
+func (p *placeholder) Stop(context.Context) error { return nil }
 
+// Status reports idle: a placeholder is never busy.
 func (p *placeholder) Status() Status {
 	return Status{State: protocol.StateIdle}
 }
 
+// SendPrompt reports that the adapter is registered but not implemented.
 func (p *placeholder) SendPrompt(context.Context, string) error {
 	return fmt.Errorf("%w: %s", ErrNotImplemented, p.name)
 }
@@ -85,10 +90,17 @@ func (p *placeholder) ReadOutput() <-chan OutputLine {
 	return ch
 }
 
-func (p *placeholder) CurrentTask() string      { return "" }
-func (p *placeholder) Repository() string       { return "" }
+// CurrentTask is always empty: a placeholder runs nothing.
+func (p *placeholder) CurrentTask() string { return "" }
+
+// Repository is always empty: a placeholder runs nothing.
+func (p *placeholder) Repository() string { return "" }
+
+// WorkingDirectory is always empty: a placeholder runs nothing.
 func (p *placeholder) WorkingDirectory() string { return "" }
-func (p *placeholder) ExitCode() (int, bool)    { return 0, false }
+
+// ExitCode reports no exit: a placeholder never runs to completion.
+func (p *placeholder) ExitCode() (int, bool) { return 0, false }
 
 // Detect looks for the tool on PATH. Implemented even though the adapter is not,
 // so device capability reporting is accurate.
@@ -143,8 +155,11 @@ type placeholderDetector struct {
 	executables []string
 }
 
+// Name returns the detector's canonical adapter identifier.
 func (d placeholderDetector) Name() string { return d.name }
 
+// Detect locates the tool on PATH, implemented even for placeholders so
+// capability reporting is accurate.
 func (d placeholderDetector) Detect(ctx context.Context) (Installation, error) {
 	return detectOnPath(ctx, d.executables...)
 }
