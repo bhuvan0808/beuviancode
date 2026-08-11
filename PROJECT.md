@@ -307,8 +307,8 @@ approval**.
 | Phase | Contents                                                                                     | Status |
 | ----- | -------------------------------------------------------------------------------------------- | ------ |
 | 1     | Project planning, architecture, folder structure, configuration, Docker, CI/CD, documentation | ✅ done |
-| 2     | Backend foundation: Fiber, authentication, database, Redis, WebSockets, logging, configuration | ⏳ next |
-| 3     | Desktop Agent: Claude adapter, session manager, power manager, reconnect logic                | ⏸      |
+| 2     | Backend foundation: Fiber, authentication, database, Redis, WebSockets, logging, configuration | ✅ done |
+| 3     | Desktop Agent: Claude adapter, session manager, power manager, reconnect logic                | ⏳ next |
 | 4     | Dashboard: authentication, responsive UI, realtime, device management, live session           | ⏸      |
 | 5     | Integration: backend, agent, dashboard, realtime, prompt forwarding, live logs                | ⏸      |
 | 6     | Deployment: Railway, Supabase, Upstash, Vercel, GitHub Actions, Docker                        | ⏸      |

@@ -29,7 +29,11 @@ services:
     ports:
       # Bound to localhost only. Binding 0.0.0.0 would expose a
       # trivially-credentialed database to the local network.
-      - "127.0.0.1:5432:5432"
+      #
+      # The host port is overridable because developers commonly already run
+      # PostgreSQL (or another project's container) on 5432, and a hardcoded
+      # mapping makes the whole stack refuse to start for them.
+      - "127.0.0.1:${BEUVIAN_POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -56,7 +60,7 @@ services:
     # silently evicting a queued prompt would lose a user's instruction. Bounded
     # memory with a hard failure is the correct tradeoff for a queue.
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${BEUVIAN_REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -103,7 +107,7 @@ services:
       BEUVIAN_AUTH_GITHUB_CLIENT_SECRET: ${BEUVIAN_AUTH_GITHUB_CLIENT_SECRET:-}
       BEUVIAN_AUTH_GITHUB_CALLBACK_URL: http://localhost:8080/v1/auth/github/callback
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${BEUVIAN_BACKEND_PORT:-8080}:8080"
 
   # One-shot configuration validator, for verifying an environment before a real
   # deploy. Not started by default; run it explicitly:

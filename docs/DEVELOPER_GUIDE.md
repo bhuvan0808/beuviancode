@@ -119,6 +119,33 @@ cd shared && go test -race ./protocol/
 cd shared && go test -race -run TestPrecedenceOrder ./config/
 ```
 
+### Integration tests
+
+Tests that need a real database sit behind a `integration` build tag, so the
+ordinary suite stays runnable with no infrastructure. A test suite that requires
+Docker to run is a test suite people stop running.
+
+```bash
+make infra    # Postgres + Redis
+
+cd backend
+BEUVIAN_TEST_DB_URL='postgres://beuvian:beuvian_local_dev@127.0.0.1:5432/beuvian?sslmode=disable' \
+  go test -tags=integration -count=1 ./internal/adapter/postgres/
+```
+
+These verify what a fake cannot: real SQL, real constraints, and the concurrency
+guarantees the schema is relied upon to provide. `TestConcurrentSessionStartsProduceExactlyOneWinner`
+fires eight simultaneous session starts and asserts exactly one survives — the
+property the unique partial index exists for, and one an application-level check
+could never provide.
+
+If you already run PostgreSQL on 5432, override the host ports rather than editing
+the compose file:
+
+```bash
+BEUVIAN_POSTGRES_PORT=55532 BEUVIAN_REDIS_PORT=56379 make infra
+```
+
 `-race` is not optional here. The gateway, the adapter registry, and the lifecycle
 supervisor are all concurrent, and a data race in any of them is precisely the kind
 of bug that only appears under production load.

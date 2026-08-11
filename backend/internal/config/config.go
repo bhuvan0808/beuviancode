@@ -256,6 +256,13 @@ type Flags struct {
 	Check bool
 	// Version prints build information and exits.
 	Version bool
+	// Migrate applies pending database migrations and exits.
+	//
+	// A separate mode rather than something the server does at boot: during a
+	// rolling deploy several instances start at once, and concurrent DDL can
+	// deadlock with the schema half-applied. This runs as one explicit step
+	// before new containers are promoted.
+	Migrate bool
 }
 
 // Load resolves the configuration from all four layers and validates the result.
@@ -275,6 +282,7 @@ func Load(args []string) (*Config, Flags, string, error) {
 	fs := flag.NewFlagSet("beuvian-backend", flag.ContinueOnError)
 	fs.BoolVar(&ops.Check, "check", false, "validate configuration and exit")
 	fs.BoolVar(&ops.Version, "version", false, "print build information and exit")
+	fs.BoolVar(&ops.Migrate, "migrate", false, "apply pending database migrations and exit")
 
 	res, err := sharedconfig.Resolve(cfg, sharedconfig.Options{
 		Args:        args,

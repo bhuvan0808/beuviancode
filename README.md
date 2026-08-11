@@ -69,27 +69,44 @@ Your agent writes the code. Beuvian gives you the cockpit.
 
 ## Status
 
-**Phase 1 of 7 complete.** The foundation is built, verified, and green on CI; the
-product does not function end to end yet.
+**Phases 1–2 of 7 complete.** The backend is live and verified against real
+PostgreSQL and Redis. The product is not usable end to end yet: nothing can drive a
+coding agent, and there is no dashboard.
 
 | Phase | Scope | Status |
 | ----- | ----- | ------ |
 | 1 | Architecture, monorepo, configuration, Docker, CI/CD, documentation | ✅ Complete |
-| 2 | Backend: Fiber, auth, database, Redis, WebSocket gateway | ⏳ Next |
-| 3 | Desktop Agent: Claude adapter, session manager, power manager, reconnect | ⏸ Planned |
+| 2 | Backend: Fiber, auth, database, Redis, WebSocket gateway | ✅ Complete |
+| 3 | Desktop Agent: Claude adapter, session manager, power manager, reconnect | ⏳ Next |
 | 4 | Dashboard: responsive UI, realtime, device management, live session | ⏸ Planned |
 | 5 | Integration: prompt forwarding and live logs end to end | ⏸ Planned |
 | 6 | Deployment: Railway, Supabase, Upstash, Vercel | ⏸ Planned |
 | 7 | Testing, performance, security review | ⏸ Planned |
 
-**What works right now:** both Go binaries build and run on Windows, macOS, and
-Linux; configuration resolves through CLI → env → file → defaults with validation;
-structured JSON logging with secret redaction; the WebSocket protocol is fully
-defined and tested; `beuvian-agent -detect` reports which coding agents are
-installed on your machine.
+### What works right now
 
-**What does not work yet:** there is no HTTP server, no database, no dashboard, and
-no adapter can actually drive a coding agent. Those are Phases 2–4.
+The backend runs and has been verified against live PostgreSQL and Redis:
+
+- **REST API** — auth, devices, repositories, sessions, prompts, notifications,
+  settings, health/readiness.
+- **GitHub OAuth** with rotating refresh tokens and reuse detection.
+- **Two separate credential families.** A device token presented to a dashboard
+  route is rejected, and vice versa — verified, not just intended.
+- **12-table schema** with 47 indexes and 58 constraints, applied by an embedded
+  migrator that holds a PostgreSQL advisory lock so a rolling deploy cannot race.
+- **WebSocket gateway** — full AUTH/ACK handshake with nonce replay protection,
+  heartbeat, status, log ingestion, and prompt delivery.
+- **The core flow, proven end to end:** queue a prompt for an **offline** device →
+  the device connects → it receives the prompt → acknowledges it → the "your coding
+  agent is waiting for you" notification is raised. All side effects persisted.
+- Both binaries cross-compile for six platforms; the backend image is 26.7 MB,
+  distroless and non-root.
+
+### What does not work yet
+
+There is **no dashboard** (Phase 4), and **no adapter can actually drive a coding
+agent** (Phase 3) — `beuvian-agent -detect` finds Claude Code on your machine but
+cannot yet launch or talk to it. The backend is ready for both.
 
 ---
 

@@ -142,6 +142,19 @@ config-check: ## Validate both binaries' configuration and exit
 detect: ## List AI coding agents installed on this machine
 	cd agent && go run ./cmd/beuvian-agent -detect
 
+.PHONY: migrate
+migrate: ## Apply pending database migrations
+	cd backend && go run ./cmd/server -migrate
+
+.PHONY: test-integration
+test-integration: ## Run integration tests (needs `make infra` first)
+	@if [ -z "$$BEUVIAN_TEST_DB_URL" ]; then \
+		echo "set BEUVIAN_TEST_DB_URL, e.g."; \
+		echo "  export BEUVIAN_TEST_DB_URL='postgres://beuvian:beuvian_local_dev@127.0.0.1:5432/beuvian?sslmode=disable'"; \
+		exit 1; \
+	fi
+	cd backend && go test -tags=integration -count=1 ./...
+
 # --- Artifacts --------------------------------------------------------------
 
 .PHONY: build-agent
