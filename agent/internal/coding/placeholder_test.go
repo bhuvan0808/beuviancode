@@ -131,16 +131,23 @@ func TestPlaceholderStatusAndAccessors(t *testing.T) {
 	}
 }
 
-func TestImplementedIsHonestAboutPhase1(t *testing.T) {
-	// Phase 1 ships no working adapter. This test is the tripwire that Phase 3
-	// must update deliberately rather than by accident.
+func TestImplementedReportsOnlyClaude(t *testing.T) {
+	// Updated deliberately in phase 3, when ClaudeAdapter landed. This was a
+	// tripwire asserting nothing was implemented; it now asserts exactly what is.
+	//
+	// The remaining four must stay false until each gets a real implementation:
+	// reporting an adapter as implemented when it is a placeholder would let the
+	// backend dispatch a prompt that can never be serviced.
+	if !coding.Implemented(coding.AdapterClaude) {
+		t.Error("Claude has a real adapter and should report as implemented")
+	}
 	for _, name := range []string{
-		coding.AdapterClaude, coding.AdapterCodex,
-		coding.AdapterGemini, coding.AdapterAider, coding.AdapterOpenHands,
+		coding.AdapterCodex, coding.AdapterGemini,
+		coding.AdapterAider, coding.AdapterOpenHands,
 	} {
 		if coding.Implemented(name) {
-			t.Errorf("Implemented(%q) = true; update this test in the same commit "+
-				"as the adapter implementation", name)
+			t.Errorf("Implemented(%q) = true, but it is still a placeholder; "+
+				"update this test in the same commit as its implementation", name)
 		}
 	}
 }

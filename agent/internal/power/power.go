@@ -76,6 +76,35 @@ type Manager interface {
 // platform should still run, with the user told that sleep cannot be prevented.
 var ErrUnsupported = errors.New("power: sleep inhibition is not supported on this platform")
 
+// Closer is implemented by managers holding an OS resource — a pinned thread on
+// Windows, a child process on macOS and Linux.
+//
+// Separate from Manager because not every implementation needs it, and callers
+// should not have to care which. Close is best-effort via the type assertion in
+// Release below.
+type Closer interface {
+	Close() error
+}
+
+// Release shuts a manager down, releasing any inhibition and OS resource.
+//
+// Always call this on the shutdown path. On Windows the inhibition is held by a
+// pinned OS thread; on macOS and Linux by a child process. Neither is reclaimed by
+// simply dropping the reference, and a leaked inhibition drains a user's battery
+// indefinitely — the worst possible parting gift from a background agent.
+func Release(m Manager) error {
+	if m == nil {
+		return nil
+	}
+	if err := m.AllowSleep(); err != nil {
+		return err
+	}
+	if c, ok := m.(Closer); ok {
+		return c.Close()
+	}
+	return nil
+}
+
 // New returns the Manager for the current platform.
 //
 // Implemented per-OS in the build-tagged files alongside this one, so selection
@@ -131,6 +160,18 @@ func (b *base) markAllowed() {
 	b.prevented = false
 	b.reason = ""
 	b.since = time.Time{}
+}
+
+// alreadyPrevented reports whether an inhibition is currently held.
+//
+// This is what makes PreventSleep and AllowSleep idempotent. Without it, a second
+// PreventSleep would acquire a second OS-level inhibition that the single
+// AllowSleep could not release — and a leaked inhibition drains a user's battery
+// until they reboot.
+func (b *base) alreadyPrevented() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.prevented
 }
 
 // unsupportedManager is used on platforms without an implementation.

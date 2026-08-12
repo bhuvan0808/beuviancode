@@ -69,16 +69,16 @@ Your agent writes the code. Beuvian gives you the cockpit.
 
 ## Status
 
-**Phases 1–2 of 7 complete.** The backend is live and verified against real
-PostgreSQL and Redis. The product is not usable end to end yet: nothing can drive a
-coding agent, and there is no dashboard.
+**Phases 1–3 of 7 complete.** The backend and the Desktop Agent both work and have
+been verified together against real PostgreSQL and Redis. What is missing is the
+dashboard — so the product works, but only from a terminal.
 
 | Phase | Scope | Status |
 | ----- | ----- | ------ |
 | 1 | Architecture, monorepo, configuration, Docker, CI/CD, documentation | ✅ Complete |
 | 2 | Backend: Fiber, auth, database, Redis, WebSocket gateway | ✅ Complete |
-| 3 | Desktop Agent: Claude adapter, session manager, power manager, reconnect | ⏳ Next |
-| 4 | Dashboard: responsive UI, realtime, device management, live session | ⏸ Planned |
+| 3 | Desktop Agent: Claude adapter, session manager, power manager, reconnect | ✅ Complete |
+| 4 | Dashboard: responsive UI, realtime, device management, live session | ⏳ Next |
 | 5 | Integration: prompt forwarding and live logs end to end | ⏸ Planned |
 | 6 | Deployment: Railway, Supabase, Upstash, Vercel | ⏸ Planned |
 | 7 | Testing, performance, security review | ⏸ Planned |
@@ -102,11 +102,30 @@ The backend runs and has been verified against live PostgreSQL and Redis:
 - Both binaries cross-compile for six platforms; the backend image is 26.7 MB,
   distroless and non-root.
 
+**The Desktop Agent** (Phase 3), verified against the live backend:
+
+- **Registers** and stores its credentials **encrypted at rest** — AES-256-GCM
+  keyed through Windows DPAPI, so a copied state file is useless on another
+  machine. Verified: no plaintext appears in the file.
+- **Supervises Claude Code** — launches it in a process group, streams stdout and
+  stderr, injects prompts into stdin, and terminates the whole tree on stop so
+  build tools it spawned are not orphaned.
+- **Reconnects on its own.** Verified by killing the backend mid-session: backoff
+  ran 0.46s → 0.96s → 2.07s → 2.93s → 3.77s with jitter and reconnected
+  automatically, while the coding session kept running throughout.
+- **Queues prompts offline.** A prompt sent while no session is running is stored
+  encrypted and injected when one starts — it survives an agent restart.
+- **Prevents sleep** only while a session is active: `SetThreadExecutionState` on
+  Windows (from an OS-locked thread, since the flags are thread-affine),
+  `caffeinate` on macOS, `systemd-inhibit` on Linux.
+- **Infers when your agent is waiting** from output falling silent, and raises the
+  notification that is the point of the whole product.
+
 ### What does not work yet
 
-There is **no dashboard** (Phase 4), and **no adapter can actually drive a coding
-agent** (Phase 3) — `beuvian-agent -detect` finds Claude Code on your machine but
-cannot yet launch or talk to it. The backend is ready for both.
+There is **no dashboard** (Phase 4). Everything above is real and works today, but
+you drive it with `curl` and read JSON. The backend and agent are both ready for a
+UI to sit on top.
 
 ---
 

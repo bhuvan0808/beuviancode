@@ -96,6 +96,40 @@ Then add validation in `validate.go`. Validation is **aggregated** — return ev
 problem rather than the first, and prefer messages that name the offending variable
 and say what to do.
 
+## Running the whole thing locally
+
+GitHub OAuth needs a registered OAuth app and a browser round trip, which is the
+right flow for real users and a poor one for local development. `devtoken` mints a
+user and an access token directly, so nothing here needs cloud credentials.
+
+It **refuses to run unless the resolved configuration says `development`** — the
+check is on the config, not a bare environment variable, so it also refuses when
+production settings arrive from a file.
+
+```bash
+make infra                              # Postgres + Redis
+make migrate                            # apply the schema
+make run-backend                        # terminal 1
+
+TOKEN=$(make -s devtoken)               # terminal 2
+echo "$TOKEN" | (cd agent && go run ./cmd/beuvian-agent -register)
+cd agent && go run ./cmd/beuvian-agent  # the agent connects
+
+# terminal 3 — act as the phone
+curl -H "Authorization: Bearer $TOKEN" localhost:8080/v1/devices
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"device_id":"dev_...","text":"Now implement authentication."}' \
+  localhost:8080/v1/prompts
+```
+
+The prompt returns `202` whether or not the device is online: it is committed to
+PostgreSQL before you are acknowledged, so it is delivered on the next reconnect
+even if Redis and the device are both unavailable.
+
+The registration token is read from **stdin, not a flag**, deliberately: a
+command-line argument lands in shell history and is visible in the process list to
+every other user on the machine.
+
 ## Local infrastructure
 
 ```bash

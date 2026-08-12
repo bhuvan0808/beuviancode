@@ -177,6 +177,13 @@ type Flags struct {
 	// Detect probes for installed coding agents and exits. Useful as the first
 	// diagnostic when a user reports "Beuvian cannot find Claude".
 	Detect bool
+
+	// Register exchanges a user access token for device credentials and exits.
+	//
+	// A separate mode because it is a one-time setup step with a different
+	// credential: it is the only operation using the USER's token rather than the
+	// device's, and the only point where the two families touch.
+	Register bool
 }
 
 // Load resolves the agent's configuration and validates it.
@@ -188,6 +195,7 @@ func Load(args []string) (*Config, Flags, string, error) {
 	fs.BoolVar(&ops.Check, "check", false, "validate configuration and exit")
 	fs.BoolVar(&ops.Version, "version", false, "print build information and exit")
 	fs.BoolVar(&ops.Detect, "detect", false, "list installed coding agents and exit")
+	fs.BoolVar(&ops.Register, "register", false, "register this device with the backend and exit")
 
 	res, err := sharedconfig.Resolve(cfg, sharedconfig.Options{
 		Args:        args,

@@ -146,6 +146,15 @@ detect: ## List AI coding agents installed on this machine
 migrate: ## Apply pending database migrations
 	cd backend && go run ./cmd/server -migrate
 
+.PHONY: devtoken
+devtoken: ## Mint a development access token (refuses outside development)
+	@cd backend && go run ./cmd/devtoken
+
+.PHONY: register-agent
+register-agent: ## Register this machine as a device (needs a token on stdin)
+	@echo "Paste an access token from \`make devtoken\`:"
+	cd agent && go run ./cmd/beuvian-agent -register
+
 .PHONY: test-integration
 test-integration: ## Run integration tests (needs `make infra` first)
 	@if [ -z "$$BEUVIAN_TEST_DB_URL" ]; then \

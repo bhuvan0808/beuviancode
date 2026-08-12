@@ -322,10 +322,24 @@ func (s *DeviceService) MarkOffline(ctx context.Context, userID, deviceID string
 }
 
 // RecordStatus persists a STATUS frame from an agent.
+//
+// The queued-prompt figure is the SUM of two distinct queues, not either one
+// alone:
+//
+//   - The backend's pending count: prompts accepted from the user but not yet
+//     delivered to the device, typically because it is offline.
+//   - The agent's own count: prompts delivered and acknowledged, but not yet
+//     injected because no coding session is running.
+//
+// Overriding one with the other was a real bug found in end-to-end testing: a
+// prompt sitting in the agent's local queue reported as zero, so a user who had
+// just sent an instruction saw "0 queued" and would reasonably conclude it had
+// been lost. What they actually care about is "instructions I sent that have not
+// been acted on yet", which is the total.
 func (s *DeviceService) RecordStatus(ctx context.Context, deviceID string, p protocol.StatusPayload, sessionID string, at time.Time) error {
-	queued, err := s.prompts.CountPending(ctx, deviceID)
-	if err != nil {
-		queued = p.QueuedPrompts // fall back to what the agent reported
+	queued := p.QueuedPrompts // waiting on the device for a session
+	if undelivered, err := s.prompts.CountPending(ctx, deviceID); err == nil {
+		queued += undelivered // waiting here for the device
 	}
 	return s.devices.SaveStatus(ctx, domain.AgentStatus{
 		DeviceID:      deviceID,

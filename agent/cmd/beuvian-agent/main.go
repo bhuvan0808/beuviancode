@@ -4,13 +4,13 @@
 // authenticated WebSocket to the Beuvian backend, streams status and output, and
 // injects prompts forwarded from the dashboard.
 //
-// Phase 1 scope: configuration, logging, the coding-adapter registry, the power
-// manager, and supervised startup/shutdown. The session manager and WebSocket
-// transport arrive in Phase 3 as additional lifecycle components; this bootstrap
-// does not change when they do.
+// main is deliberately thin: it constructs dependencies, hands them to the
+// lifecycle supervisor, and translates the result into an exit code. Everything
+// else lives behind an interface in internal/.
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -25,6 +25,9 @@ import (
 	"github.com/bhuvan0808/beuviancode/agent/internal/coding"
 	"github.com/bhuvan0808/beuviancode/agent/internal/config"
 	"github.com/bhuvan0808/beuviancode/agent/internal/power"
+	"github.com/bhuvan0808/beuviancode/agent/internal/session"
+	"github.com/bhuvan0808/beuviancode/agent/internal/store"
+	"github.com/bhuvan0808/beuviancode/agent/internal/transport"
 	"github.com/bhuvan0808/beuviancode/shared/lifecycle"
 	blog "github.com/bhuvan0808/beuviancode/shared/log"
 	"github.com/bhuvan0808/beuviancode/shared/version"
@@ -70,19 +73,35 @@ func run(args []string) int {
 	}, logWriter)
 
 	// The adapter registry is constructed per-process rather than as a package
-	// global, so it carries no cross-test state and its contents are explicit
-	// here. Phase 3 adds the real Claude adapter alongside these placeholders.
+	// global, so it carries no cross-test state and its contents are explicit here.
 	registry := coding.NewRegistry()
-	if err := coding.RegisterPlaceholders(registry); err != nil {
+	if err := coding.RegisterAll(registry); err != nil {
 		logger.Error("failed to register coding adapters", blog.Err(err))
 		return exitRuntime
 	}
 
-	// -detect is the first diagnostic to reach for when a user reports that
-	// Beuvian cannot find their coding agent, so it works without a valid
-	// connection or device registration.
 	if ops.Detect {
 		return runDetect(logger, registry)
+	}
+
+	stateStore := store.Open(cfg.Device.StatePath)
+	state, err := stateStore.Load()
+	if err != nil {
+		if errors.Is(err, store.ErrCorrupt) {
+			// Unrecoverable: the credentials cannot be read back. Say so plainly
+			// and tell the user the one action that fixes it.
+			logger.Error("the local state file could not be decrypted",
+				slog.String("path", stateStore.Path()),
+				slog.String("action", "delete it and re-run `beuvian-agent -register`"),
+				blog.Err(err))
+			return exitRuntime
+		}
+		logger.Error("failed to load local state", blog.Err(err))
+		return exitRuntime
+	}
+
+	if ops.Register {
+		return runRegister(cfg, stateStore, registry, logger)
 	}
 
 	build := version.Get()
@@ -93,7 +112,8 @@ func run(args []string) int {
 		slog.String("device_name", cfg.Device.Name),
 		slog.String("adapter", cfg.Coding.Adapter),
 		slog.String("backend", cfg.Backend.String()),
-		slog.String("state_path", cfg.Device.StatePath),
+		slog.String("state_path", stateStore.Path()),
+		slog.String("state_protection", stateStore.Protection()),
 		slog.String("config_file", orNone(cfgFile)),
 	)
 
@@ -101,19 +121,17 @@ func run(args []string) int {
 		logger.Debug("effective configuration", slog.String("settings", strings.Join(lines, " ")))
 	}
 
-	// Fail early on an adapter name that does not exist. Discovering this at the
-	// moment a user tries to start a session — after they have walked away from
-	// the laptop — is exactly the wrong time.
 	if !registry.Has(cfg.Coding.Adapter) {
-		logger.Error("configured adapter is not registered",
+		logger.Error("the configured adapter is not registered",
 			slog.String("adapter", cfg.Coding.Adapter),
 			slog.Any("available", registry.Names()))
 		return exitConfigError
 	}
 	if !coding.Implemented(cfg.Coding.Adapter) {
-		logger.Warn("selected adapter is a placeholder and cannot run a session yet",
+		logger.Error("the configured adapter is a placeholder and cannot run a session",
 			slog.String("adapter", cfg.Coding.Adapter),
-			slog.String("note", "adapter implementations land in phase 3"))
+			slog.String("hint", "only \"claude\" is implemented"))
+		return exitConfigError
 	}
 
 	if ops.Check {
@@ -121,32 +139,20 @@ func run(args []string) int {
 		return exitOK
 	}
 
-	sup := lifecycle.New(logger, 10*time.Second)
-
-	// Power management is registered first so it is released last: sleep must
-	// stay inhibited until the coding session has actually finished shutting
-	// down, not while it is still draining.
-	if cfg.Power.Enabled {
-		sup.Add(newPowerComponent(power.New(logger), logger))
-	} else {
-		logger.Info("sleep prevention is disabled by configuration")
+	// Registration is a precondition for everything else: the WebSocket cannot be
+	// opened without a device token.
+	if !state.Registered() {
+		logger.Error("this device is not registered",
+			slog.String("action", "run `beuvian-agent -register` with an access token from the dashboard"))
+		return exitConfigError
+	}
+	if state.TokenExpiringSoon(time.Now().UTC()) {
+		logger.Warn("the device token expires soon",
+			slog.Time("expires_at", state.TokenExpiry),
+			slog.String("action", "re-run `beuvian-agent -register` before it lapses"))
 	}
 
-	// Phase 3 registers the real work here, in dependency order:
-	//   sup.Add(store.New(cfg.Device.StatePath, logger))
-	//   sup.Add(transport.NewClient(cfg.Backend, state, logger))
-	//   sup.Add(session.NewManager(cfg, registry, powerMgr, transport, logger))
-	sup.Add(lifecycle.Func{
-		ComponentName: "bootstrap",
-		OnStart: func(context.Context) error {
-			logger.Warn("no session components registered yet",
-				slog.String("phase", "1"),
-				slog.String("note", "session manager and WebSocket transport arrive in phase 3"))
-			return nil
-		},
-	})
-
-	if err := sup.Run(context.Background()); err != nil {
+	if err := serve(cfg, stateStore, registry, logger); err != nil {
 		if errors.Is(err, context.Canceled) {
 			logger.Info("stopped")
 			return exitOK
@@ -154,15 +160,131 @@ func run(args []string) int {
 		logger.Error("terminated with errors", blog.Err(err))
 		return exitRuntime
 	}
-
 	logger.Info("stopped cleanly")
+	return exitOK
+}
+
+// serve constructs the components and runs the supervisor.
+func serve(cfg *config.Config, stateStore *store.Store, registry *coding.Registry, logger *slog.Logger) error {
+	powerMgr := power.New(logger)
+	if cfg.Power.Enabled {
+		if st := powerMgr.Status(); !st.Supported {
+			logger.Warn("sleep prevention is unavailable on this platform build",
+				slog.String("impact", "the machine may sleep during a long session"))
+		}
+	} else {
+		logger.Info("sleep prevention is disabled by configuration")
+	}
+
+	// The transport and the session manager reference each other: the manager
+	// sends through the transport, and the transport dispatches inbound frames to
+	// the manager. The cycle is broken once, here, rather than with an indirection
+	// both sides would pay for on every call.
+	client := transport.New(transport.Deps{
+		Config: cfg.Backend,
+		Store:  stateStore,
+		Log:    logger,
+		// Evaluated at each handshake rather than once at startup: a user may
+		// install Claude Code while the agent is running, and the backend needs to
+		// know so it can dispatch prompts to this device.
+		Capabilities: func() []string {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return registry.Capabilities(ctx)
+		},
+	})
+
+	manager := session.New(session.Deps{
+		Config:   *cfg,
+		Registry: registry,
+		Sender:   client,
+		Power:    powerMgr,
+		Store:    stateStore,
+		Log:      logger,
+	})
+
+	client.SetHandler(manager)
+
+	sup := lifecycle.New(logger, 20*time.Second)
+
+	// Registration order is startup order; shutdown is its exact reverse. The
+	// session manager stops FIRST, so the coding agent is terminated and the sleep
+	// inhibition released before the transport that reports it goes away.
+	sup.Add(client)
+	sup.Add(manager)
+
+	return sup.Run(context.Background())
+}
+
+// runRegister exchanges a user access token for device credentials.
+func runRegister(cfg *config.Config, stateStore *store.Store, registry *coding.Registry, logger *slog.Logger) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	// The token is read from stdin rather than a flag, deliberately: a command-line
+	// argument lands in shell history and is visible in the process list to every
+	// other user on the machine.
+	fmt.Println("Beuvian device registration")
+	fmt.Println()
+	fmt.Printf("  1. Sign in at %s\n", cfg.Backend.APIURL)
+	fmt.Println("  2. Copy your access token from the dashboard")
+	fmt.Println()
+	fmt.Print("Paste the access token (input is not echoed to the log): ")
+
+	reader := bufio.NewReader(os.Stdin)
+	accessToken, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		fmt.Fprintln(os.Stderr, "could not read the token:", err)
+		return exitRuntime
+	}
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		fmt.Fprintln(os.Stderr, "no token supplied")
+		return exitConfigError
+	}
+
+	capabilities := registry.Capabilities(ctx)
+	if len(capabilities) == 0 {
+		// Not fatal, but worth saying: a device with no coding agent installed
+		// cannot service any prompt, and the user should know before they wonder
+		// why nothing happens.
+		fmt.Println()
+		fmt.Println("Warning: no coding agents were detected on this machine.")
+		fmt.Println("Install Claude Code and make sure `claude` is on your PATH.")
+		fmt.Println()
+	}
+
+	resp, err := transport.NewRegistrar(cfg.Backend).Register(ctx, accessToken, capabilities)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "registration failed:", err)
+		return exitRuntime
+	}
+
+	if err := transport.SaveRegistration(stateStore, resp, ""); err != nil {
+		// The backend now holds a device we cannot use. Say exactly that, rather
+		// than reporting a generic failure.
+		fmt.Fprintln(os.Stderr, "registered, but the credentials could not be saved:", err)
+		fmt.Fprintln(os.Stderr, "re-run registration once the problem is fixed.")
+		return exitRuntime
+	}
+
+	fmt.Println()
+	fmt.Println("Registered successfully.")
+	fmt.Printf("  device:     %s (%s)\n", resp.Device.Name, resp.Device.ID)
+	fmt.Printf("  expires:    %s\n", resp.ExpiresAt.Format(time.RFC1123))
+	fmt.Printf("  state file: %s\n", stateStore.Path())
+	fmt.Printf("  protection: %s\n", stateStore.Protection())
+	fmt.Println()
+	fmt.Println("Run `beuvian-agent` to connect.")
+
+	logger.Info("device registered",
+		slog.String("device_id", resp.Device.ID),
+		slog.Any("capabilities", capabilities))
 	return exitOK
 }
 
 // runDetect probes for installed coding agents and reports what it found.
 func runDetect(logger *slog.Logger, registry *coding.Registry) int {
-	// Bounded so one hanging `--version` call cannot make the diagnostic itself
-	// look broken.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -210,36 +332,8 @@ func runDetect(logger *slog.Logger, registry *coding.Registry) int {
 		fmt.Println("install it yourself and make sure `claude` is on your PATH.")
 		return exitRuntime
 	}
+	_ = logger
 	return exitOK
-}
-
-// newPowerComponent wraps the power manager as a lifecycle component.
-//
-// Acquiring the inhibition at startup rather than per-session is a Phase 1
-// simplification with a deliberate boundary: Phase 3's session manager takes
-// ownership and holds it only while a session is active, which is what PROJECT.md
-// specifies. Until then the agent holds nothing, because the current
-// implementation is the honest unsupported one.
-func newPowerComponent(mgr power.Manager, logger *slog.Logger) lifecycle.Component {
-	return lifecycle.Func{
-		ComponentName: "power",
-		OnStart: func(context.Context) error {
-			st := mgr.Status()
-			if !st.Supported {
-				// Not an error: the agent is perfectly usable, the user just
-				// needs to know their machine may sleep mid-session.
-				logger.Warn("sleep prevention is unavailable on this platform build",
-					slog.String("note", "the machine may sleep during a long session"))
-			}
-			return nil
-		},
-		OnStop: func(context.Context) error {
-			// Unconditional release. AllowSleep is safe when nothing is held, and
-			// a leaked inhibition would drain the user's battery indefinitely —
-			// the worst possible parting gift from a background agent.
-			return mgr.AllowSleep()
-		},
-	}
 }
 
 // openLogWriter returns the log sink, duplicating to a file when configured.
@@ -251,20 +345,18 @@ func openLogWriter(path string) (io.Writer, func(), error) {
 		return os.Stderr, func() {}, nil
 	}
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		// The path is the user's own configured log location — creating it is
-		// the feature, not an injection vector.
-		if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // G703: user-chosen log path
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, nil, fmt.Errorf("create log directory %s: %w", dir, err)
 		}
 	}
-	// 0600: agent logs can contain repository paths and task descriptions, which
-	// are not for other users of a shared machine.
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // G304: user-chosen log path
+	// 0600: agent logs contain repository paths and task descriptions, which are
+	// not for other users of a shared machine.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, nil, err
 	}
-	// Tee rather than replace, so an interactive run still shows output while
-	// also leaving a record behind.
+	// Tee rather than replace, so an interactive run still shows output while also
+	// leaving a record behind.
 	return io.MultiWriter(os.Stderr, f), func() { _ = f.Close() }, nil
 }
 

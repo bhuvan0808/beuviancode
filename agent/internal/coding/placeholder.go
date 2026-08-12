@@ -174,7 +174,7 @@ func (d placeholderDetector) Detect(ctx context.Context) (Installation, error) {
 // This is the single place Phase 3 edits when ClaudeAdapter lands.
 func Implemented(name string) bool {
 	implemented := []string{
-		// Phase 3 adds AdapterClaude here.
+		AdapterClaude, // real implementation in claude.go (phase 3)
 	}
 	for _, n := range implemented {
 		if n == name {
@@ -206,13 +206,35 @@ func knownAdapters() []struct {
 	}
 }
 
-// RegisterPlaceholders registers every adapter named in PROJECT.md.
+// RegisterAll registers every adapter named in PROJECT.md.
 //
-// In Phase 1 all of them are placeholders whose Start fails with
-// ErrNotImplemented, but each carries a real Detector, so `beuvian-agent -detect`
-// gives an accurate picture of the machine. Phase 3 replaces the Claude factory
-// with the real adapter; nothing else changes, which is the extension point
-// working as designed.
+// Claude gets the real implementation from claude.go; the other four remain
+// placeholders whose Start fails with ErrNotImplemented while still carrying a
+// working Detector, so `beuvian-agent -detect` reports them accurately.
+//
+// Note what changed between phases: the Claude factory, and nothing else. Adding a
+// real adapter is one entry in this switch, which is the extension point working
+// as designed rather than as an aspiration.
+func RegisterAll(r *Registry) error {
+	for _, a := range knownAdapters() {
+		factory := newPlaceholder(a.name, a.executables...)
+		if a.name == AdapterClaude {
+			factory = newClaudeAdapter
+		}
+		err := r.Register(a.name, factory,
+			placeholderDetector{name: a.name, executables: a.executables})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RegisterPlaceholders is retained for tests that need every adapter to be inert.
+//
+// Kept separate rather than parameterising RegisterAll: a test asserting the
+// placeholder contract should not be able to accidentally exercise the real
+// adapter and launch a process.
 func RegisterPlaceholders(r *Registry) error {
 	for _, a := range knownAdapters() {
 		err := r.Register(a.name,
